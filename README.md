@@ -9,8 +9,24 @@ En este taller mostramos cómo analizar respuestas ecológicas frente a dos o m�
 El archivo 'cookbook.R' contiene el código para ejecutar los análisis estadísticos en R. Se proporciona la función sim.multi.str() que permite usar datos simulados, que se encuentra en el archivo 'simul_functions.R'.
 
 ```
-source("simul_functions.R")
-sim.multi.str(n, ses, ac, mod.type="mixed",plot.int=F)->sim.set
+# Simulated dataset
+
+set.seed (1234) # sets a numerical starting point 
+n <- 100 # number of sites
+ac <- 3 # accuracy SD units of error
+
+# Single stressor hierarchy s1 > s2 > s3 = s4
+# Interaction hierarchy 1:3 > 1:2 > 2:4
+# s1, s2, s3, s4, s1:s2, s1:s3, s2:s4
+ses<-c(5, 3, 2, 2, 2, 3, 1)
+
+# Simulating data
+sim.multi.str(n, ses, ac, mod.type="additive", plot.int=T)->sim.set.add
+sim.multi.str(n, ses, ac, mod.type="antagonistic", plot.int=T)->sim.set.ant
+sim.multi.str(n, ses, ac, mod.type="synergistic", plot.int=T)->sim.set.syn
+sim.multi.str(n, ses, ac, mod.type="opposing", plot.int=T)->sim.set.opo
+sim.multi.str(n, ses, ac, mod.type="mixed", plot.int=F)->sim.set
+
 sim.set$sim.dat->dat
 ```
 
