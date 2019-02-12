@@ -65,7 +65,7 @@ Si utilizas o modificas el material contenido en este repositorio, cítalo adecu
 Gutiérrez-Cánovas, C., Capdevilla, P. (2019) Modelling multi-stressor responses across ecosystems in R
 GitHub repository, https://github.com/tanogc/Multistressors-SIBECOL.git
 ```
-Para cualquier uso que trascienda dicha licencia o cualquier aclaración, contactar con Cayetano Gutiérrez Cánovas (cayeguti@um.es) o Pol Capdevilla (pcapdevila.pc@gmail.com).
+Para cualquier uso que trascienda dicha licencia o cualquier aclaración, contactar con Cayetano Gutiérrez Cánovas (cayeguti@um.es) o Pol Capdevilla Lanzaco (pol.capdevila@zoo.ox.ac.uk).
 
 
 
