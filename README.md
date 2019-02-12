@@ -22,16 +22,16 @@ ac <- 3 # accuracy SD units of error
 # Single stressor hierarchy s1 > s2 > s3 = s4
 # Interaction hierarchy 1:3 > 1:2 > 2:4
 # s1, s2, s3, s4, s1:s2, s1:s3, s2:s4
-ses<-c(5, 3, 2, 2, 2, 3, 1)
+ses <- c(5, 3, 2, 2, 2, 3, 1)
 
 # Simulating data (additive, antagonistic, synergistic, opposing and mixed responses)
-sim.multi.str(n, ses, ac, mod.type="additive", plot.int=T)->sim.set.add
-sim.multi.str(n, ses, ac, mod.type="antagonistic", plot.int=T)->sim.set.ant
-sim.multi.str(n, ses, ac, mod.type="synergistic", plot.int=T)->sim.set.syn
-sim.multi.str(n, ses, ac, mod.type="opposing", plot.int=T)->sim.set.opo
-sim.multi.str(n, ses, ac, mod.type="mixed", plot.int=F)->sim.set
+sim.multi.str(n, ses, ac, mod.type="additive", plot.int=T) -> sim.set.add
+sim.multi.str(n, ses, ac, mod.type="antagonistic", plot.int=T) -> sim.set.ant
+sim.multi.str(n, ses, ac, mod.type="synergistic", plot.int=T) -> sim.set.syn
+sim.multi.str(n, ses, ac, mod.type="opposing", plot.int=T) -> sim.set.opo
+sim.multi.str(n, ses, ac, mod.type="mixed", plot.int=F) -> sim.set
 
-sim.set$sim.dat->dat
+sim.set$sim.dat -> dat
 ```
 
 ## Artículo original
