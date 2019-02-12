@@ -1,0 +1,523 @@
+---
+title: "Modelling multi-stressor responses across ecosystems in R"
+author: Cayetano Gutiérrez Cánovas & Pol Capdevila Lanzaco
+date: "`r Sys.Date()`"
+output: pdf_document
+fontsize: 14pt 
+urlcolor: blue
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Resumen
+
+Este taller pretende iniciar a los participantes en el modelado de los efectos de estresores múltiples en los ecosistemas. El cambio global está incrementando el número y la intensidad de los estresores que están impactando los sistemas naturales, que pueden producir efectos que se desvían de la simple suma de sus efectos individuales (interacciones). Para cuantificar los efectos combinados de los distintos estresores, es necesario que usemos técnicas que consideren los posibles efectos interactivos y que exploren la importancia relativa de cada estresor.
+ 
+Durante el taller, los participantes se familiarizarán con el protocolo de modelado para explorar los efectos de los estresores múltiples usando código escrito en R. Este protocolo consiste en dos pasos principales: 
+
+1. Un análisis exploratorio (Random Forest y Boosted Regression Trees) para evaluar la importancia de los estresores e identificar posibles interacciones. 
+2. Estimar el tamaño del efecto y la importancia de los estresores y de sus interacciones usando la técnica de "multi-model inference" (promedio ponderado de los coeficientes de los estresores que aparecen en los mejores modelos).
+ 
+Los participantes tendrán contacto con el tipo de datos y técnicas estadísticas necesarias para modelar los efectos de los estresores múltiples, así como con las funciones de R y el código necesario para su implementación. La filosofía del taller es puramente práctica: trabajaremos un caso de estudio para mostrar el potencial de este enfoque, así como las preguntas más frecuentes que pueden surgir durante la aplicación de este protocolo. Proporcionaremos artículos y código para que los participantes puedan continuar su aprendizaje después del taller. El conocimiento adquirido durante el taller podrá ser aplicado a cualquier tipo de ecosistema u organismo.
+ 
+Recomendaciones:
+
+-	Conocimiento básico de R y modelos lineales generalizados, GLMs (regresiones, ANOVAs).
+-	Portátil propio con las últimas versiones de R y RStudio previamente instalados.
+
+##Los modelos ecológicos
+
+En ciencias de la vida, y en particular en ecología, usamos modelos para testar hipótesis, analizar patrones o predecir respuestas en distintos tipos de ecosistemas y unidades de organización biológica. Aunque en muchas ocasiones resulta conveniente simplificar la realidad y centrarnos en una variable respuesta y otra explicativa, en general, solemos explorar una lista cada vez mayor de factores candidatos que puedan explicar nuestra variable de interés. 
+
+El hecho de usar múltiples variables predictoras ofrece una serie de ventajas, pero también conlleva una mayor complejidad de análisis y ciertas limitaciones prácticas. Entre las ventajas, podemos destacar una mayor capacidad para cuantificar el tamaño del efecto de cada predictor (*effect size*) y su importancia relativa. Sin embargo, a medida que introducimos nuevos predictores, nuestro modelo se va haciendo más complejo y empezarán a surgir ciertas complicaciones. Entre las más habituales, encontramos el reto de encontrar el "mejor" modelo (ver sección 3 para más detalles) o la ocurrencia de interacciones entre nuestras variables.
+
+En este taller mostraremos un protocolo que usa distintas estrategias para abordar el modelado de los efectos de varios predictores en una variable respuesta usando el marco desarrollado para los multiple stressors (Figura 1; Feld et al., 2016). Aunque este taller no pretende ser un repaso exhaustivo a los distintos métodos de modelado en ecología y ciencias de la vida, veremos un abanico amplio de métodos que se adaptan a los casos más comunes que podemos encontrar. Para profundizar, recomendamos libros especializados en técnicas de modelado ecológico (Burnham and Anderson, 2002; Crawley, 2014; Zuur et al., 2009). 
+
+Los modelos estadísticos son herramientas con distintas capacidades, ventajas e inconvenientes, que tienen un ámbito concreto de aplicación y una serie de reglas que debemos cumplir para asegurarnos de que los resultados que obtenemos son fiables. De manera ideal, querríamos una técnica de modelado fuera:
+
+-	__Flexible__ respecto a su ámbito de aplicación o a los datos que pudieran incluir
+- __Transparente__, de sencilla interpretación y con una alta capacidad para identificar las variables predictoras más importantes y predecir respuestas ecológicas.
+
+Pero como ocurre habitualmente, no lo podemos tener todo. Así, hay modelos (modelos generalizados lineales, incluyendo la familia de los GLM y sus extensiones mixtas) que son ampliamente conocidos, para lo bueno y para lo malo. Se trata de modelos muy transparentes, y con una gran capacidad para testar hipótesis ecológicas, al precio de ser bastante sensibles al incumplimiento de ciertas asunciones previas (e.g. la normalidad y homocedasticidad de los residuos del modelo, y la independencia de las observaciones). Además, también tienen una limitación importante respecto al número de predictores que podemos explorar y que depende del número de observaciones de nuestros datos. De manera general, solo se puede testar un predictor por cada 10 observaciones, regla conocida como "[one in ten rule](https://en.wikipedia.org/wiki/One_in_ten_rule)" (Harrell, 2001). 
+
+Por otra parte, en el extremo opuesto, los modelos basados en árboles de decisión y algoritmos de *machine learning*, conocidos como *Classification and Regression Trees* (CART), son modelos extremadamente flexibles, con una gran capacidad exploratoria y con pocas asunciones previas a cumplir, por lo que son capaces de superar muchas de las limitaciones presentes en los modelos de tipo GLM/GLMM. Es decir, pueden modelar datos de naturaleza muy diversa y acomodando relaciones tanto lineales como no lineales. Además, no están sujetos a las asunciones de normalidad y homocedasticidad de los residuos del modelo. Además, teóricamente son capaces de explorar un gran número de predictores pese a tener pocas observaciones. A cambio, se trata de modelos muy complejos, poco transparentes y no muy adecuados para testar hipótesis ya que no podemos calcular los tamaños de los efectos de cada predictor ni su *p-valor*.
+
+Más allá de cuestiones técnicas, no debemos de olvidar que estamos haciendo ciencia. Así, antes de comenzar a analizar los datos, debemos reflexionar bien sobre la relación que cada uno de nuestros predictores tiene sobre la variable respuesta. Es recomendable establecer relaciones teóricas que tengan un claro sentido biológico para desarrollar hipótesis o predicciones robustas que puedan ser testadas estadísticamente (ver pp. 1-5 Crawley, 2014). Esto ayudará a descartar predictores que puedan tener una relación espuria (sin sentido ecológico) con la variable respuesta y facilitará la interpretación de los resultados. Por lo tanto, antes de analizar toca leer y pensar: es imprescindible que conozcamos bien la literatura clave y el conocimiento más actual (*state of the art*) de nuestro campo. 
+ 
+
+```{r, fig.align='center', fig.cap='Procedimiento para hacer un análisis de estresores múltiples (extraída de Feld et al., 2016).', echo=FALSE}
+knitr::include_graphics('Figure1.pdf')
+```
+
+#Empezando por lo primero: Cargado de datos
+
+Antes de empezar con el taller debemos asegurarnos que cargamos bien los datos y paquetes necesarios para este workshop.
+
+Para ello primero determinamos el directorio de trabajo mediante la función `setwd`.
+
+```{r, echo=FALSE} 
+# Setting working directory
+
+setwd("C:/Users/zool2260/Dropbox/multistress_SIBECOL/RScripts")
+```
+
+```{r, eval=FALSE} 
+# Setting working directory
+
+setwd("C:/Users/VUESTRO USUARIO/Dropbox/multistress_SIBECOL/Participants")
+
+```
+
+Una vez asignado el directorio de trabajo, vamos a pasar a cargar las librerías. Seguramente la mayoría de ellas las tendremos que instalar, usando la función `install.packages()`.
+
+```{r, eval=FALSE} 
+
+# Install required packages
+
+if (!requireNamespace("BiocManager", quietly = TRUE))
+   install.packages("BiocManager")
+ BiocManager::install("variancePartition", version = "3.8")
+install.packages("usdm")
+install.packages("randomForestSRC")
+install.packages("ggRandomForests")
+install.packages("gbm")
+install.packages("dismo")
+install.packages("MuMIn")
+install.packages("lattice")
+```
+
+Cargamos las librerías. 
+
+```{r, results="hide",warning=FALSE, message=F, eval=F} 
+
+# Loading required libraries
+# The required packages should be installed
+
+library(usdm) # Collinearity
+library(randomForestSRC) # RF
+library(ggRandomForests) # RF
+library(gbm) # BRT
+library(dismo) # BRT
+library(MuMIn) # Multi-model inference
+library(variancePartition)
+library(lattice)
+```
+
+```{r, results="hide",warning=FALSE, message=F,echo=FALSE} 
+
+# Loading required libraries
+# The required packages should be installed
+
+library(usdm) # Collinearity
+library(randomForestSRC) # RF
+library(ggRandomForests) # RF
+library(gbm) # BRT
+library(dismo) # BRT
+library(MuMIn) # Multi-model inference
+library(variancePartition)
+library(lattice)
+```
+
+Ahora cargamos las funciones para simular los datos. Fijaros que en este guion utilizamos datos simulados para simplificar este workshop. Sin embargo, puede ser que cuando os enfrenteis a vuestros propios datos, no sea tan fácil. Si es muy complicado, no dudeis en contactar con los instructores para que os den una mano en vuestro trabajo. 
+
+```{r}
+# Loading required functions
+source("simul_functions.R")
+
+# Simulated dataset
+
+set.seed (1234) # sets a numerical starting point 
+n <- 100 # number of sites
+ac <- 3 # accuracy SD units of error
+
+# Single stressor hierarchy s1 > s2 > s3 = s4
+# Interaction hierarchy 1:3 > 1:2 > 2:4
+# s1, s2, s3, s4, s1:s2, s1:s3, s2:s4
+ses<-c(5, 3, 2, 2, 2, 3, 1)
+
+# Simulating data
+sim.multi.str(n, ses, ac, mod.type="additive",plot.int=T)->sim.set.add
+sim.multi.str(n, ses, ac, mod.type="antagonistic",plot.int=T)->sim.set.ant
+sim.multi.str(n, ses, ac, mod.type="synergistic",plot.int=T)->sim.set.syn
+sim.multi.str(n, ses, ac, mod.type="opposing",plot.int=T)->sim.set.opo
+
+sim.multi.str(n, ses, ac, mod.type="mixed",plot.int=F)->sim.set
+
+sim.set$sim.dat->dat
+```
+
+# Preparando los datos
+
+Una vez que tenemos nuestra base de datos a punto y con todas las variables que deseamos investigar, podemos empezar a explorar los datos y prepararlos para el análisis.
+
+En esta fase, las operaciones fundamentales que vamos a realizar son: 
+1. Visualizar la distribución de nuestras variables a través de histogramas 2. Transformar aquellas variables que presenten distribuciones sesgadas ("no-acampanadas"). 
+
+Esto favorecerá la linealidad de las relaciones entre variables y que podamos cumplir las asunciones de normalidad y homocedasticidad de los residuos de nuestros modelos.
+
+Las transformaciones más típicas son las logarítmicas, logit y raíz cuadrada (aunque hay muchas más) y dependerán de la forma de la distribución de los datos originales (sin transformar). Podemos probar varias transformaciones hasta que alcancemos una distribución más acampanada. En muchas ocasiones no se puede obtener una forma apropiada debido a que el número de observaciones es bajo, porque se trata de una distribución bimodal o por otras razones.
+
+Podemos visualizar la distribución de las variables de nuestro set de datos `dat`, usando la función `hist()`. 
+
+```{r}
+hist(dat$s1) # muestra el histograma de la variable s1
+```
+
+##Outliers
+
+Podemos definir "*outliers*" aquellos valores extremadamente elevados o bajos con respecto a nuestro set de datos. 
+
+Una buena forma para de detectar outliers visualmente es usando la función `boxplot()`  
+
+```{r}
+# outliers
+boxplot(dat$s1)
+```
+
+##Colinealidad
+
+Los modelos requieren que las variables sean independientes. No afecta a la significación del modelo pero si a sus predicciones. Para ello podemos utilizar las funciones `cor()` (correlación) y/o `vif()` (*variance inflation*).    
+
+
+```{r}
+# Collinearity
+
+# calculates pairwise Pearson correlation coefficients for all variables 
+# of the object dat; note that the function 	is only applicable to numerical variables
+
+round(as.dist(cor(dat[,-1])),2)
+
+# Exploring collinearity using Variance Inflation Factor
+vif(dat[,-1])
+```
+
+En esta fase no hace falta que tomemos decisiones sobre si debemos eliminar variables altamente correlacionadas o valores extremos, pero esta información nos vendrá bien para refinar los modelos que realicemos en las siguientes fases. En algunos casos, los valores extremos podrían alterar los modelos tipo CART o por supuesto a los modelos de tipo GLM/GLMM. Más adelante, cuando seleccionemos las variables más importantes, sí que estudiemos qué variables o casos tendremos que eliminar.
+
+#Explorando los datos
+
+Una vez que los datos están preparados, pasaremos a explorar qué variables predictoras son más importantes. Para esta tarea, podemos usar diversas técnicas, pero en este caso nos centraremos en tres: 
+
+- Correlaciones 
+- Random Forest
+- Boosted Regression Trees.
+
+Estas herramientas exploratorias son potentes pero debemos usarlas de manera racional y siguiendo buenos criterios de modelado (ver sección Lecturas Recomendadas para ver limitaciones y críticas a los CART).
+
+Si tenemos datos con estructuras de dependencia espacial (estructuras anidadas, medidas repetidas) y/o temporal (series temporales), tendremos que ser extremadamente cuidadosos a la hora de ejecutar los análisis exploratorios. En algunos casos, podremos solucionar este problema seleccionando subconjuntos de datos para los cuales no tengamos medidas repetidas o dependientes. También podemos incluir la variable que da cuenta de la estructura anidada o de autocorrelación temporal de nuestros datos, aunque esto puede entrañar cierto riesgo. Ver Appendix 3 en Feld et al. (2016) para más detalles y posibles soluciones.
+
+##Correlaciones
+
+Las correlaciones nos muestran, a través de un coeficiente, la relación que tienen dos variables. Los coeficientes pueden tomar valores de -1 hasta +1. Los coeficientes negativos implican que el incremento de una variable está relacionado con el descenso de otra. Los coeficientes positivos indican que ambas variables tienen tendencias muy similares. Un coeficiente próximo a 0 indica que ambas variables tienen poca relación.
+
+Podemos usar dos tipos de correlación: a) el coeficiente de correlación de Pearson (r) mide el grado de relación lineal entre dos variables; b) el coeficiente de Spearman ($\rho$), que mide la asociación entre dos variables, pero es menos sensible a valores extremos y falta de linealidad. 
+
+
+```{r}
+cor(dat$y, dat$s1, method="pearson") # correlation between y, s1
+cor(dat$y,dat$s1, method="spearman") # correlation between y, s1
+
+```
+
+
+## Random Forest
+
+Los Random Forest (RF) son técnicas de modelado no-paramétricas con una alta flexibilidad para manejar variables de naturaleza diversa. Así, las variables (respuesta y predictores) pueden ser de tipo continuo, discreto, categórico y binario. Este tipo de modelos también incluye la posibilidad de usar variables predictoras con valores ausentes, conocidos como "*missing values*" o NAs. Además, los RF pueden modelar datasets con pocas observaciones y muchos predictores. También tienen capacidad para modelar respuestas no lineales e interacciones (Breiman, 2001; Ishwaran et al., 2014).
+
+Simplificando, los RF ejecutan una serie de modelos (árboles de decisión, *regression trees*) basados en subconjuntos de nuestro *dataset* ("in the bag"=learning data), que normalmente suponen dos tercios de las observaciones de las que disponemos. Los modelos dividen nuestros datos según criterios binarios tales como pH<7, altura > 200 m o color == "amarillo". Cada uno de estos modelos se aplica al tercio restante de observaciones ("out-of-bag"=test data) para identificar las variables predictoras más importantes y la capacidad predictiva del modelo. Finalmente, todos estos modelos se combinan para producir un modelo final más potente. Para más información sobre los Random Forest y es recomendable revisar literatura especializada (Breiman, 2001; Cutler et al., 2007; Ishwaran et al., 2014; Strobl et al., 2009, 2008).
+
+
+En este taller vamos a usar la función `rfsrc()` de la libería `randomForestSRC` (Ishwaran et al., 2014). En esta función tenemos que introducir:
+
+- `model formula`: las variables del modelo
+- `mtry`: número de predictores usados para cada división binaria en los árboles de decisión. Normalmente suele ser un tercio del total de predictores si estamos haciendo una regresión.
+- `ntree`: número de árboles (número de modelos a ejecutar)
+- `importance`:  método de cálculo de la importancia de los predictores
+
+```{r}
+# Función para ejecutar el RF
+# my.rf nos da los detalles del modelo , e.g. bondad de ajuste, out-of-bag (OBB) error
+my.rf <- rfsrc (y ~ ., mtry = 6, ntree = 2000, importance = "permute", 	data = dat) 
+my.rf
+# plot para determinar el número óptimo de árboles
+plot (na.omit(gg_error (my.rf)))
+
+# gg_vimp() importancia de los predictores
+my.rf.vimp <- gg_vimp (my.rf)
+my.rf.vimp
+plot (my.rf.vimp) # plot mostrando la importancia de los predictores
+
+# Variables más importantes
+md.obj <- max.subtree (my.rf)
+md.obj$topvars 
+# Explorando interacciones
+my.rf.interact<-find.interaction(my.rf, xvar.names = md.obj$topvars, 	
+                               importance= "permute", method = "vimp", 
+                               nrep = 3)
+
+```
+
+
+## Boosted Regression Trees
+
+Los Boosted Regression Tree analysis (BRT) tienen unas características muy similares a los RF, aunque usan algoritmos distintos para producir los modelos finales. Recomendamos la lectura de Elith et al. (2008) para más detalles.
+
+En este taller vamos a usar la función `gbm.step` y las liberías `gbm` (Ridgeway, 2015) y `dismo` (Hijmans R.J. et al., 2016). En esta función tenemos que introducir:
+
+- `gbm.y`: variable respuesta (número de columna)
+- `gbm.x`: predictores (número de columna)
+- `family`: define el tipo de función y el error de la distribución para la variable respuesta. Usaremos "gaussian" para variables contínuas, "poisson" para variables discretas (e.g. number of species) y "bernoulli" para variables binomiales (0, 1).
+- `learning.rate` determina el número total de modelos ejecutados (trees). Valores pequenos tienden a producir muchos modelos, mientras que valores altos producirán menos modelos. Podemos empezar a probar con learning.rate=0.005 e ir aumentando dicho valor.
+- `bag.fraction`: porcentaje de observaciones que observaciones que usaremos para hacer cada modelo (árbol)
+- `tree.complexity`: define el tipo de interacciones que se van a testar. Valores de 1 indican un modelo puramente aditivo. Para testar interacciones entre pares de variables tendremos que establecer un valor de 2.
+
+Para determinar los valores más apropiados de `learning.rate` debemos ejecutar el modelo varias veces con valores distintos de estos dos parámetros hasta que encontremos valores estables. Se recomienda que el modelo BRT que construyamos tenga al menos 1000 árboles (*regression trees*) (Elith et al. 2008).
+
+```{r}
+# BRT con interacciones entre parejas de predictores y un 67% de los datos
+#usados para construir el modelo
+my.brt <- gbm.step (data = dat, gbm.x = c(2:ncol(dat)), gbm.y = 1,  	
+                    family = "gaussian", tree.complexity = 2, 
+                    learning.rate = 0.005, 	bag.fraction = 0.67) 
+
+# Bondad de ajuste del modelo basada en el cross validation
+my.brt$self.statistics$mean.null -> null.dev
+my.brt$cv.statistics$deviance.mean -> resid.dev
+1-resid.dev/null.dev
+
+# Importancia de los predictores
+brt.imp <- summary (my.brt)
+brt.imp
+
+# Variables más importantes
+my.brt.simp <- gbm.simplify (my.brt)
+```
+
+
+```{r}
+# Explorando interacciones
+int.my.brt <- gbm.interactions (my.brt) # objeto con los resultados
+int.my.brt$interactions # interacciones
+int.my.brt$rank.list # lista con el ranking de las interacciones
+```
+
+#Modelos finales
+
+##Selección de predictores
+
+Una vez hemos ejecutado los modelos RF y/o BRT nos toca elegir qué predictores vamos a usar. Para ello nos basaremos en su importancia relativa y también en información teórica o empírica previa, como hemos comentado al principio (Crawley, 2014; Grueber et al., 2011). Existen algunas funciones de R que hacen una selección automática de los predictores más importantes para RF y BRT. Sin embargo, esta no es la opción más recomendada, ya que esta selección tiene que ser supervisada para que nos aseguremos de que no se escapa ninguna variable clave y de que estas variables tienen un sentido biológico/ecológico. Es probable que RF y BRT nos den resultados ligeramente distintos, sobre todo si el número de observaciones no es grande (e.g. > 100 observaciones). En estos casos, observaremos qué variables son importantes en ambos modelos y cuáles difieren. Para aquellas variables que muestren grandes diferencias entre RF y BRT, tendremos que tomar una decisión basada en nuestra información previa y su sentido ecológico.
+
+La cantidad de predictores que seleccionemos está condicionada por el número de observaciones que tengamos. De manera general, podemos seguir la regla de *one in ten*, que implica un término predictor por cada 10 observaciones. Así, si modelamos un dataset con 72 observaciones, podremos incluir hasta siete términos en el modelo. En algunos casos estas reglas pueden cambiar, pero es importante ser conservador para asegurar unos resultados robustos.
+
+A la hora de elegir los predictores, debemos evitar incluir aquellos que tengan una alta colinealidad. Podemos usar como criterio aquellas parejas de predictores con una correlación de Pearson r $\geq$ 0.70, de las que eliminaremos el predictor que tenga una menor importancia predictiva en los RF o BRT y/o aquel que tenga menos sentido biológico/ecológico. Finalmente, es conveniente que estandaricemos los predictores usando la función `scale()`, que los convierte en variables con `media=0` y `SD=1`. Esto nos permitirá una correcta estimación y comparación del tamaño del efecto de los predictores (coeficientes de regresión), ya que estarán en las mismas unidades. Si tenemos variables cualitativas tendremos que aplicar otro tipo de estandarizaciones (Grueber et al., 2011; ver también [sum-to-zero contrasts](https://atyre2.github.io/2016/09/03/sum-to-zero-contrasts.html)).
+
+##Selección de modelos: métodos tradicionales vs. multi-model inference
+
+De manera tradicional, en ecología, se han usado procedimientos *step-wise* para averiguar qué predictores son más importantes a la hora de predecir nuestra variable de interés (Grueber et al., 2011; Johnson and Omland, 2004). Este procedimiento de selección de modelos consiste en ir añadiendo (*forward selection*) o quitando (*backward selection*) variables predictoras en función de su capacidad para explicar nuestros datos y de la complejidad del modelo. Existen varias medidas para medir la bondad de ajuste y la complejidad del modelo. Entre los más utilizados se encuentran el Akaike Information Criterion (AIC) y su versión para muestras pequeñas (observaciones/parámetros estimados < 40; AICc). En este taller usaremos AIC por cuestiones de simplicidad. 
+
+Sin embargo, esta estrategia conlleva limitaciones importantes como, por ejemplo, una capacidad reducida para testar varias hipótesis al mismo tiempo, el riesgo de excluir variables explicativas importantes que no aparezcan en el modelo elegido o la obtención de tamaños de efecto sesgados para algunas variables explicativas (Johnson and Omland, 2004).
+
+En los últimos años, se han empezado a usar metodologías basadas en la selección e inferencia a partir de varios modelos, conocidas como *model selection* y *multi-model inference* (Burnham and Anderson, 2002; Grueber et al., 2011; Johnson and Omland, 2004), que son capaces de solventar las limitaciones de los métodos *step-wise*. Este enfoque se basa en promediar los coeficientes de los mejores modelos que incluyan distintas combinaciones de los predictores más importantes. Así, en vez de seleccionar un solo modelo que minimice el AIC, vamos a seleccionar un conjunto de modelos que cumplan una serie de criterios (e.g. aquellos que no difieran en más de 2, 4 o 6 unidades de AIC respecto al modelo con el AIC más bajo o aquellos modelos que acumulen un 95%). Con esta metodología, obtendremos un modelo final que recoge información de un subconjunto grande de modelos y permite testar varias hipótesis al mismo tiempo.
+
+Aunque proporcionaremos recomendaciones para su correcta aplicación, esta estrategia tampoco está exenta de críticas ni limitaciones (Cade, 2015; Tyre, 2017; Walker, 2018).
+
+##Multi-model inference
+
+Una vez que hemos elegido todas las variables que van a formar parte del modelo, calcularemos los coeficientes (tamaño del efecto) y el p-valor de los predictores. Para ello, seguiremos tres pasos: 1) Modelo global, 2) Multi-model inference y 3) validación de las asunciones del modelo
+
+1.	**Establecer el modelo global y definir la función de enlace**
+
+Para construir el modelo global usaremos un tipo de modelo que sea apropiado en relación a la estructura de nuestros datos. Este modelo incluirá la variable respuesta a modelar y todos los predictores seleccionados con la metodología anteriormente explicada (recordemos la necesidad de incluir solo variables explicativas con un sentido ecológico/biológico claro). Entre las técnicas de modelado disponibles, los GLM ofrecen una gran flexibilidad para modelar variables respuesta de tipo continuo, discreto y binario que no tengan estructuras de dependencia espacial o temporal (e.g. una medida por localidad, y que las localidades sean independientes). Los modelos que tengan estructuras de dependencia espacial y/o temporal se tendrán que modelar usando modelos de tipo GLMM o GAMM, que permiten la inclusión de factores aleatorios ("random incercepts/slopes"). Por simplicidad vamos a ilustrar este ejemplo con un GLM con un error gaussiano. Para más detalles sobre GLM, GAM, GLMM y GAMM recomendamos consultar Zuur et al. (2009)., el [GLMM FAQ](https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html) y el blog [From the bottom of the heap](https://www.fromthebottomoftheheap.net/).
+
+Una vez hemos decidido qué técnica estadística vamos a usar, crearemos un modelo global con la variable respuesta y todos los predictores de interés respetando la regla de *one in ten*. Entre los predictores, incluiremos términos individuales y las interacciones más relevantes (y términos cuadráticos, si procede). Es muy importante destacar que debemos introducir las interacciones de forma muy cuidadosa y en función de nuestras hipótesis, información previa y también basado en los resultados de los modelos RF y BRT. En R podemos especificar interacciones de dos formas `a:b` o `a*b` (equivalente `a: a+b+a:b`).  
+
+```{r}
+# Modelo global, función genérica del GLM gaussiano, lm()
+mod <- lm (y ~ s1 + s2 + s3 + s6 + s9 + s1:s2 + s1:s3, data=dat)
+summary(mod)
+r.squaredGLMM(mod)
+``` 
+
+2.	**Multi-model inference**
+
+En el segundo paso, usaremos la función `dredge()` de la librería `MuMIn` (Barton, 2016) para generar todos los modelos posibles a partir de distintas combinaciones de las variables explicativas contenidas en el modelo global. Recomendamos inspeccionar cuidadosamente los resultados producidos por la función `dredge()`. En esta inspección evaluaremos que los modelos con AIC más bajo tienen sentido ecológico. Además, evaluaremos el rango de variación y la distribución de los tamaños de efecto (coeficientes de regresión) para cada variable explicativa, en particular en aquellos modelos que difieran en 2 unidades con el modelo con el AIC mínimo. Seguidamente,  ordenaremos los modelos en función de su AIC u otra medida análoga apropiada (Grueber et al., 2011; Johnson and Omland, 2004), y de su peso relativo de evidencia (Akaike weight). El "weight" nos indica la probabilidad de que un modelo sea el mejor modelo aproximado en relación a nuestros datos, por lo que la suma del weight de todos los modelos siempre sumará 1. En el caso de que un modelo tenga un weight mayor que 0,90 bastaría para seleccionarlo como modelo final y no sería necesario realizar los pasos siguientes (selección de modelos y promedio de sus coeficientes).
+
+
+```{r}
+# ejecuta todos los modelos posibles y clasifica los modelos en función del AIC de cada modelo. 
+#También se visualiza la bondad de ajuste
+options(na.action = "na.fail") # necesario para ejecutar dredge()
+mod_d <- dredge (mod, rank = "AIC", 
+                      extra = c(R2=function(x) r.squaredGLMM(x)))
+mod_d # ranking de los modelos producidos
+```
+
+El siguiente paso usaremos la función `get.models()` para seleccionar los mejores modelos en función de su AIC o de su "weight" (en caso de que no tengamos ningún modelo con un weight > 0,90). Así, podemos seleccionar aquellos modelos con una diferencia en el AIC (delta o $\Delta$AIC) igual o inferior a 2, 4 o 6 unidades respecto al modelo con el AIC menor, o seleccionar el mínimo número de mejores modelos cuyo weight conjunto sea $\geq$ 0,95. De manera alternativa, también nos podríamos quedar con el modelo de mayor sentido ecológico y sea menos complecjo dentro de los que tengan un AIC más bajo ($\Delta$AIC $\geq$ 2). A día de hoy, no existe consenso sobre qué método seguir (Grueber et al., 2011), así que dependerá de la pregunta ecológica a responder y de la inspección de los tamaños de efecto realizada con anterioridad (Banner and Higgs, 2017).
+
+```{r}
+# ejemplo1: subconjunto delta AIC mayor o igual que 2
+mod_set <- get.models (mod_d, subset=delta<=2) 
+# ejemplo2: subconjunto AIC mayor o igual que 0.95
+mod_set <- get.models (mod_d, subset = cumsum  	(mod_d$weight)<=.95) 
+```
+Finalmente, a través de la función `model.avg()`, procederemos a obtener los coeficientes (tamaño del efecto) promedio y el p valor para cada una de las variables explicativas contenidas en los modelos seleccionados. Esta función nos ofrece dos tipos de promediado que, en ambos casos, proporcionan de una media de los coeficientes ponderada por el weight de cada modelo. El *zero-method average* (*full average* en R) considera el valor de los coeficientes de cada variable explicativa que aparecen en los modelos seleccionados y el valor cero para aquellos modelos que no contengan dicha variable. Por el contrario, el *natural average* (*conditional average* en R) solo promedia los valores de los coeficientes incluidos en los modelos seleccionados. Aunque no existe un consenso sobre cuál de los dos métodos es más apropiado (Grueber et al., 2011), el primero es más conservador. Por lo tanto, la elección de uno u otro dependerá de la pregunta a resolver.
+
+
+```{r}
+mod_av <- model.avg (mod_set, revised.var = TRUE) # model 	averaging 
+summary (mod_av) # resultados del multi-model averaging
+```
+
+De manera adicional, también podemos promediar las predicciones de los modelos seleccionados, que podremos comparar con las dos estimaciones del model averaging de los coeficientes.
+
+
+```{r}
+# Predicción del modelo que promedia los coeficientes (full)
+predict(mod_av, full = T)-> av_pred_full
+# Predicción del modelo que promedia los coeficientes (conditional)
+predict(mod_av, full = F)-> av_pred_subset
+# Predicción del modelo que promedia los valores estiamdos
+rowMeans(data.frame(lapply(mod_set, predict))) -> av_pred_res
+
+```
+
+3.	**Comprobar y validar las asunciones del modelo**
+
+Actualmente, no existe una manera sencilla de comprobar las asunciones de normalidad de residuos, homocedasticidad y autocorrelación espacial/temporal en los residuos del modelo promedio. Por lo tanto, se pueden comprobar en el modelo global o en cada uno de los modelos seleccionados. Para ver más detalles sobre cómo comprobar las asunciones de los modelos GLMM o GAMM, recomendamos consultar Zuur et al. (2009).
+
+Aunque el *multi-model inference* nos puede ayudar a reducir la incertidumbre en el modelado ecológico, existe un debate activo sobre sus limitaciones reales y las circunstancias en las cuales podemos aplicarla de forma segura (Banner and Higgs, 2017; Tyre, 2017). En cualquier caso, debemos de ser cuidadosos en la selección de variables explicativas y evitar la tentación de usar esta técnica como un sistema automático (no supervisado) de selección de modelos.
+
+#Visualización e interpretación de los resultados
+
+Existen varias formas de interpretar y evaluar la importancia relativa de los efectos aditivos y combinados (interacciones) entre predictores. La mejor manera de interpretar nuestros resultados es comenzar con una visualización de sus efectos. Para ello, podemos construir una gráfica donde se muestre la respuesta de un predictor 1 en función de distintos valores (bajos, intermedios y altos) de un predictor 2. Además, también nos será útil examinar el signo de los coeficientes de los dos estresores individuales y de su interacción. Por conveniencia, llamaremos indicador a la variable respuesta, y estresores 1 y 2 a los dos predictores independientes.
+
+```{r, fig.align='center', fig.cap='Visualización e interpretación de las interacciones entre predictores (extraída de Feld et al., 2016). En este ejemplo se usan dos estresores como predictores.', echo=FALSE}
+knitr::include_graphics('Figure2.jpg')
+```
+
+De esta manera, podemos clasificar los efectos en cuatro tipos (Figura 2): 
+
+1.	*Efectos aditivos.* A nivel ecológico, podemos decir que el efecto de ambos estresores es independiente y aditivo. El efecto final de los dos estresores coincide con la suma de sus efectos individuales. En la visualización observaremos que el indicador (eje y) muestra una respuesta frente al estresor 1 que tienen la misma pendiente para distintos valores del estresor 2 (líneas de respuesta paralelas). Dependiendo de la importancia relativa de ambos estresores, las líneas paralelas estarán más o menos juntas. Los signos de los coeficientes de los estresores pueden ser positivos o negativos, y la interacción estará próxima a cero (normalmente, un p valor alto).
+
+2.	*Efectos sinérgicos.* A nivel ecológico, podemos decir que el efecto de ambos estresores es dependiente ya que ambos estresores se potencian y causan un daño mayor al esperado por la suma de sus efectos individuales. En la visualización observaremos que las líneas divergen a medida que el estresor 1 aumenta. En este caso, los coeficientes de los estresores y de la interacción tienen el mismo signo, y normalmente son distintos de cero. En caso de que los dos estresores tengan efectos negativos, veremos como la línea que representa el valor más alto para el estresor 2 muestra una reducción del indicador mucho más intensa que para valores menores. Es importante considerar que esta interacción se puede dar para variables que tienen un efecto positivo (e.g. temperatura y nutrientes para el crecimiento de plantas o algas).
+
+3.	*Efectos antagónicos.* A nivel ecológico, interpretaremos que el efecto de ambos estresores es dependiente y son capaces de neutralizarse, causando un efecto combinado menor del esperado por la suma de sus efectos individuales. En la visualización veremos como las líneas convergen cuando los valores del estresor 2 van siendo mayores. En este caso, los coeficientes de los estresores tienen el mismo signo y pero la interacción tiene un signo contrario (normalmente los coeficientes difieren de cero).
+
+4.	*Efectos opuestos.* A nivel ecológico se trata de una interacción compleja de interpretar y que nos indica que el estresor 1 puede tener efectos positivos o negativos en el indicador dependiendo de los valores del estresor 2. En la visualización observaremos como las rectas se cruzan cuando los estresores toman valores intermedios. En este caso, los coeficientes de los estresores tienen distinto signo, mientras que la interacción puede tener signo positivo o negativo (normalmente los coeficientes difieren de cero).
+
+En muchas ocasiones uno o varios de los predictores que interaccionan son factores semi-cuantitativos o cualitativos. En estos casos la interpretación de la interacción es más compleja y nos debemos guiar sobre todo por la visualización de las respuestas. Existen más maneras de clasificar e interpretar las interacciones, pero son tema de estudio avanzado (Côté et al., 2016; Feld et al., 2016; Piggott et al., 2015; Schäfer and Piggott, 2018).
+
+Además de esta interpretación, es conveniente hacer una partición de la varianza para cuantificar la importancia relativa de las interacciones respecto a los efectos individuales. La librería [`variancePartition`](https://bioconductor.org/packages/release/bioc/html/variancePartition.html) es bastante útil, pero solo funciona con variables cuantitativas y tiene algunas limitaciones respecto al modelo que podemos usar. Solo es posible aplicarla al modelo global o a los modelos individuales, pero no al promedio.
+
+Es recomendable consultar las revisiones y meta-análisis de los efectos de los estresores múltiples disponibles para un amplio rango de varios ecosistemas y tipos de organismo (Cameron et al., 2016; Crain et al., 2008; Jackson et al., 2016; Przeslawski et al., 2015; Velasco et al., 2019).
+
+#Referencias
+
+Banner, K.M., Higgs, M.D., 2017. Considerations for assessing model averaging of regression coefficients: Ecol. Appl. 27, 78-93. doi:10.1002/eap.1419
+
+Barton, K., 2016. MuMIn: Multi-model inference. R package version 1.15.6. Version 1, 18.
+
+Breiman, L., 2001. Random forests. Mach. Learn. 45, 5-32.
+
+Burnham, K.P., Anderson, D.R., 2002. Model selection and multimodel inference: A practical information-theoretic approach (2nd ed), Ecological Modelling. doi:10.1016/j.ecolmodel.2003.11.004
+
+Cade, B., 2015. Model averaging and muddled multimodel inferences. Ecology 96, 2370-2382.
+
+Cameron, E.K., Vilà, M., Cabeza, M., 2016. Global meta-analysis of the impacts of terrestrial invertebrate invaders on species, communities and ecosystems. Glob. Ecol. Biogeogr. 25, 596-606. doi:10.1111/geb.12436
+
+Côté, I.M., Darling, E.S., Brown, C.J., 2016. Interactions among ecosystem stressors and their importance in conservation. Proc. R. Soc. B Biol. Sci. 283, 20152592. doi:10.1098/rspb.2015.2592
+
+Crain, C.M., Kroeker, K., Halpern, B.S., 2008. Interactive and cumulative effects of multiple human stressors in marine systems. Ecol. Lett. 11, 1304-1315. doi:10.1111/j.1461-0248.2008.01253.x
+
+Crawley, M.J., 2014. Statistics. An introduction Using R, 2nd ed. Wiley.
+
+Cutler, D.R., Edwards Jr, T.C., Beard, K.H., Cutler, A., Hess, K.T., Gibson, J., Lawler, J.J., 2007. Random Forests for Classification in Ecology 88, 2783-2792. doi:10.1890/07-0539.1
+
+Elith, J., Leathwick, J.R., Hastie, T., 2008. A working guide to boosted regression trees. J. Anim. Ecol. 77, 802-813. doi:10.1111/j.1365-2656.2008.01390.x
+
+Feld, C.K., Segurado, P., Gutiérrez-Cánovas, C., 2016. Analysing the impact of multiple stressors in aquatic biomonitoring data: A 'cookbook' with applications in R. Sci. Total Environ. 573. doi:10.1016/j.scitotenv.2016.06.243
+
+Grueber, C.E., Nakagawa, S., Laws, R.J., Jamieson, I.G., 2011. Multimodel inference in ecology and evolution: Challenges and solutions. J. Evol. Biol. 24, 699-711. doi:10.1111/j.1420-9101.2010.02210.x
+
+Harrell, F.E., 2001. Regression modeling strategies: with applications to linear models, logistic regression, and survival analysis. Springer.
+
+Hijmans R.J., S., P., J., L., J., E., 2016. dismo: Species Distribution Modeling.
+
+Ishwaran, H., Gerds, T.A., Kogalur, U.B., Moore, R.D., Gange, S.J., Lau, B.M., 2014. Random survival forests for competing risks. Biostatistics 15, 757-773. doi:10.1093/biostatistics/kxu010
+
+Jackson, M.C., Loewen, C.J.G., Vinebrooke, R.D., Chimimba, C.T., 2016. Net effects of multiple stressors in freshwater ecosystems: A meta-analysis. Glob. Chang. Biol. 22, 180-189. doi:10.1111/gcb.13028
+
+Johnson, J.B., Omland, K.S., 2004. Model selection in ecology and evolution. Trends Ecol. Evol. 19, 101-108. doi:10.1016/j.tree.2003.10.013
+
+Piggott, J.J., Townsend, C.R., Matthaei, C.D., 2015. Reconceptualizing synergism and antagonism among multiple stressors. Ecol. Evol. 5, 1538-1547. doi:10.1002/ece3.1465
+
+Przeslawski, R., Byrne, M., Mellin, C., 2015. A review and meta-analysis of the effects of multiple abiotic stressors on marine embryos and larvae. Glob. Chang. Biol. 21, 2122-2140. doi:10.1111/gcb.12833
+
+Ridgeway, G., 2015. gbm: Generalized Boosted Regression Models.
+
+Schäfer, R.B., Piggott, J.J., 2018. Advancing understanding and prediction in multiple stressor research through a mechanistic basis for null models. Glob. Chang. Biol. 24, 1817-1826. doi:10.1111/gcb.14073
+
+Strobl, C., Boulesteix, A.L., Kneib, T., Augustin, T., Zeileis, A., 2008. Conditional variable importance for random forests. BMC Bioinformatics. doi:10.1186/1471-2105-9-307
+
+Strobl, C., Malley, J., Gerhard T., 2009. Characteristics of classification and regression trees, bagging and random forests. Psychol. Methods 14, 323-348. doi:10.1037/a0016973.An
+
+Tyre, D., 2017. Does model averaging make sense? [WWW Document]. A few cheap shots. URL http://atyre2.github.io/2017/06/16/rebutting_cade.html
+
+Velasco, J., Gutiérrez-Cánovas, C., Botella-Cruz, M., Sánchez-Fernández, D., Arribas, P., Carbonell, J.A., Millán, A., Pallarés, S., 2019. Effects of salinity changes on aquatic organisms in a multiple stressor context. Phil. Trans. R. Soc. B 374, 20180011. doi:10.1098/RSTB.2018.0011
+
+Walker, J.A., 2018. On model averaging partial regression coefficients. bioRxiv. doi:10.1111/j.1468-5922.2007.00690.x
+
+Zuur, A.F., Ieno, E.N., Walker, N.J., Saveliev, A.A., Smith, G.M., Ebooks Corporation., 2009. Mixed effects models and extensions in ecology with R, Statistics for Biology and Health. doi:10.1007/978-0-387-87458-6
+
+
+#Lecturas recomendadas 
+
+**Classification and regression trees (CART)**
+
+[Boosted Regression Trees for ecological modeling](https://cran.r-project.org/web/packages/dismo/vignettes/brt.pdf) ([paper](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/j.1365-2656.2008.01390.x))
+
+[A very basic introduction to Random Forests using R](https://www.blopig.com/blog/2017/04/a-very-basic-introduction-to-random-forests-using-r/)
+
+[Random Survival Forests for R](https://pdfs.semanticscholar.org/951a/84f0176076fb6786fdf43320e8b27094dcfa.pdf)
+
+Las limitaciones de los CART, en Dynamic Ecology por Brian McGill (artículos [1](https://dynamicecology.wordpress.com/2012/09/11/statistical-machismo/) y [2](https://dynamicecology.wordpress.com/2017/12/06/poll-results-on-statistical-machismo/))
+
+**Data exploration**
+
+[A protocol for data exploration to avoid common statistical problems](https://besjournals.onlinelibrary.wiley.com/doi/10.1111/j.2041-210X.2009.00001.x)
+
+**GLM, GLMM and GAMMs**
+
+[A protocol for conducting and presenting results of regression-type analyses](https://besjournals.onlinelibrary.wiley.com/doi/full/10.1111/2041-210X.12577)
+
+[Three points to consider when choosing a LM or GLM test for count data](https://besjournals.onlinelibrary.wiley.com/doi/10.1111/2041-210X.12552)
+
+[GLMM FAQ](https://bbolker.github.io/mixedmodels-misc/glmmFAQ.html)
+
+[Overview GAMM analysis of time series data](http://www.sfs.uni-tuebingen.de/~jvanrij/Tutorial/GAMM.html)
+
+[Modelling seasonal data with GAMs](https://www.fromthebottomoftheheap.net/2014/05/09/modelling-seasonal-data-with-gam/)
+
+[Additive modelling (GAMM) global temperature time series: revisited](https://www.fromthebottomoftheheap.net/2016/03/25/additive-modeling-global-temperature-series-revisited/)
+
+[Climate change and spline interactions (GAMs)](https://www.fromthebottomoftheheap.net/2015/11/21/climate-change-and-spline-interactions/)
+
+**Model interpretation and p-values**
+
+[Ajuste, interpretación y presentación de modelos lineales: el valor p no es suficiente](https://www.revistaecosistemas.net/index.php/ecosistemas/article/view/1451/1058)
+
+[Assessing hypotheses and simulation-based approaches](https://github.com/rbslandau/Data_analysis/blob/master/Slides/3.pdf)
+
+[Advancing understanding and prediction in multiple stressor research through a mechanistic basis for null models](https://onlinelibrary.wiley.com/doi/full/10.1111/gcb.14073)
+
+[The ASA's Statement on p-Values: Context, Process, and Purpose](https://amstat.tandfonline.com/doi/full/10.1080/00031305.2016.1154108#.W59KJZMzbow)
+
+**Multi-model inference criticisms and limitations**
+
+[Does model averaging make sense?](http://atyre2.github.io/2017/06/16/rebutting_cade.html)
+
+[Model averaging and muddled multimodel inferences](https://esajournals.onlinelibrary.wiley.com/doi/10.1890/14-1639.1)
+
+[Considerations for assessing model averaging of regression coefficients](https://esajournals.onlinelibrary.wiley.com/doi/full/10.1002/eap.1419)
+
